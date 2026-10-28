@@ -1,22 +1,26 @@
-"use strict";
-
-/* =========================================
-   SMART PARKING SYSTEM — APPLICATION LOGIC
-   ========================================= */
-
-const STORAGE_KEY = "smartParkingPrototype_v1";
 const DEFAULT_RATE = 40;
 const SLOT_IDS = ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8"];
 
-let state = loadState();
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyA5UTRbH0o-5ngmHS-klgqM3Gs654YneA8",
+  authDomain: "smart-parking-system-8f184.firebaseapp.com",
+  databaseURL: "https://smart-parking-system-8f184-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "smart-parking-system-8f184",
+  storageBucket: "smart-parking-system-8f184.firebasestorage.app",
+  messagingSenderId: "286870994873",
+  appId: "1:286870994873:web:f3d39d1d4e2e7643390068",
+  measurementId: "G-6PCCWJZP4L"
+};
+
+let state = createDefaultState();
 let selectedExitTicket = null;
-let toastTimer = null;
+let toastTimer;
+let firebaseReady = false;
+let remoteUpdateInProgress = false;
+let saveQueue = Promise.resolve();
+let stateRef = null;
 
-/* =========================================
-   DATA AND STORAGE
-   ========================================= */
-
-function createInitialState() {
+function createDefaultState() {
   return {
     rate: DEFAULT_RATE,
     slots: SLOT_IDS.map(id => ({
@@ -29,54 +33,144 @@ function createInitialState() {
   };
 }
 
-function loadState() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-
-    if (saved) {
-      const data = JSON.parse(saved);
-
-      if (Array.isArray(data.slots) && Array.isArray(data.sessions)) {
-        data.rate = Number(data.rate) || DEFAULT_RATE;
-
-        data.sessions.forEach(session => {
-          if (session.status === "active" && !session.startAt) {
-            session.startAt = session.createdAt || Date.now();
-          }
-        });
-
-        // Keep active sessions linked to their slots.
-        data.slots.forEach(slot => {
-          const session = data.sessions.find(
-            item => item.id === slot.sessionId ||
-              item.ticketId === slot.reservationId
-          );
-
-          if (session && session.status === "active") {
-            slot.sessionId = session.id;
-            slot.reservationId = session.ticketId;
-            slot.sensor = "occupied";
-          }
-        });
-
-        return data;
-      }
-    }
-  } catch (error) {
-    console.error("Could not load parking data:", error);
+function normalizeState(data) {
+  if (!data || !Array.isArray(data.slots) || !Array.isArray(data.sessions)) {
+    return createDefaultState();
   }
 
-  return createInitialState();
+  data.rate = Number(data.rate) || DEFAULT_RATE;
+
+  data.sessions.forEach(session => {
+    if (session.status === "active" && !session.startAt) {
+      session.startAt = session.createdAt || Date.now();
+    }
+  });
+
+  SLOT_IDS.forEach(id => {
+    if (!data.slots.some(slot => slot.id === id)) {
+      data.slots.push({
+        id,
+        sensor: "vacant",
+        sessionId: null,
+        reservationId: null
+      });
+    }
+  });
+
+  data.slots.forEach(slot => {
+    const session = data.sessions.find(item => item.id === slot.sessionId);
+
+    if (session && session.status === "active") {
+      slot.sensor = "occupied";
+    }
+  });
+
+  data.slots.sort((a, b) => SLOT_IDS.indexOf(a.id) - SLOT_IDS.indexOf(b.id));
+
+  return data;
+}
+
+// ---------------- FIREBASE CONNECTION ----------------
+
+function setConnectionStatus(connected, message = "") {
+  const title = document.querySelector(".sidebar-bottom strong");
+  const subtitle = document.querySelector(".sidebar-bottom small");
+  const indicator = document.querySelector(".sidebar-bottom .status-indicator");
+
+  if (title) {
+    title.textContent = connected ? "Cloud connected" : "Connecting to cloud";
+  }
+
+  if (subtitle) {
+    subtitle.textContent = connected
+      ? "Changes sync across counters"
+      : (message || "Checking Firebase connection");
+  }
+
+  if (indicator) {
+    indicator.classList.toggle("connected", connected);
+  }
+}
+
+function initializeFirebase() {
+  if (typeof firebase === "undefined") {
+    setConnectionStatus(false, "Firebase SDK did not load");
+    showToast("Firebase SDK did not load. Check your internet connection.");
+    return;
+  }
+
+  try {
+    const app = firebase.apps.length
+      ? firebase.app()
+      : firebase.initializeApp(FIREBASE_CONFIG);
+
+    const database = app.database();
+    stateRef = database.ref("parkingSystem");
+
+    firebase.auth().signInAnonymously()
+      .then(() => stateRef.once("value"))
+      .then(snapshot => {
+        if (!snapshot.exists()) {
+          return stateRef.set(createDefaultState());
+        }
+      })
+      .then(() => {
+        stateRef.on(
+          "value",
+          snapshot => {
+            remoteUpdateInProgress = true;
+
+            state = normalizeState(snapshot.val());
+            firebaseReady = true;
+
+            renderAll();
+
+            if (selectedExitTicket) {
+              renderExitResult();
+            }
+
+            remoteUpdateInProgress = false;
+            setConnectionStatus(true);
+          },
+          error => {
+            remoteUpdateInProgress = false;
+            console.error("Firebase realtime listener error:", error);
+            firebaseReady = false;
+            setConnectionStatus(false, "Database access denied");
+            showToast("Database access failed. Check Firebase Authentication and Rules.");
+          }
+        );
+      })
+      .catch(error => {
+        console.error("Firebase initialization failed:", error);
+        firebaseReady = false;
+        setConnectionStatus(false, "Firebase connection failed");
+        showToast("Firebase connection failed. Check Authentication and Rules.");
+      });
+  } catch (error) {
+    console.error("Could not initialize Firebase:", error);
+    firebaseReady = false;
+    setConnectionStatus(false, "Firebase setup error");
+    showToast("Firebase setup failed. Check the configuration and browser console.");
+  }
 }
 
 function saveState() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (error) {
-    console.error("Could not save parking data:", error);
-    showToast("Could not save data in this browser.");
+  if (!firebaseReady || remoteUpdateInProgress || !stateRef) {
+    return;
   }
+
+  const snapshotToSave = JSON.parse(JSON.stringify(state));
+
+  saveQueue = saveQueue
+    .then(() => stateRef.set(snapshotToSave))
+    .catch(error => {
+      console.error("Could not save parking data to Firebase:", error);
+      showToast("Could not save to cloud. Check Firebase Rules and connection.");
+    });
 }
+
+// ---------------- GENERAL UTILITIES ----------------
 
 function makeId() {
   let id;
@@ -93,10 +187,6 @@ function makeSessionId() {
     ? window.crypto.randomUUID()
     : `${Date.now()}-${Math.random()}`;
 }
-
-/* =========================================
-   FORMATTING AND HELPERS
-   ========================================= */
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, character => ({
@@ -124,9 +214,7 @@ function formatDuration(start, end = Date.now()) {
   const hours = Math.floor(minutes / 60);
   const remaining = minutes % 60;
 
-  return hours
-    ? `${hours}h ${remaining}m`
-    : `${remaining}m`;
+  return hours ? `${hours}h ${remaining}m` : `${remaining}m`;
 }
 
 function calculateFee(start, end = Date.now()) {
@@ -154,9 +242,7 @@ function statusLabel(slot) {
 }
 
 function getSessionForSlot(slot) {
-  return state.sessions.find(session =>
-    session.id === slot.sessionId
-  ) || null;
+  return state.sessions.find(session => session.id === slot.sessionId) || null;
 }
 
 function sessionStatusPill(session) {
@@ -175,9 +261,7 @@ function sessionStatusPill(session) {
   return '<span class="status-pill">Closed</span>';
 }
 
-/* =========================================
-   RENDER DASHBOARD
-   ========================================= */
+// ---------------- RENDER DASHBOARD ----------------
 
 function renderAll() {
   renderStats();
@@ -187,33 +271,28 @@ function renderAll() {
   renderTicketTable();
   renderExitResult();
 
-  document.getElementById("rate-display").textContent = state.rate;
+  const rateDisplay = document.getElementById("rate-display");
+
+  if (rateDisplay) {
+    rateDisplay.textContent = state.rate;
+  }
 }
 
 function renderStats() {
-  document.getElementById("total-count").textContent =
-    state.slots.length;
+  document.getElementById("total-count").textContent = state.slots.length;
 
   document.getElementById("available-count").textContent =
-    state.slots.filter(slot =>
-      getSlotStatus(slot) === "available"
-    ).length;
+    state.slots.filter(slot => getSlotStatus(slot) === "available").length;
 
   document.getElementById("occupied-count").textContent =
-    state.slots.filter(slot =>
-      slot.sensor === "occupied"
-    ).length;
+    state.slots.filter(slot => slot.sensor === "occupied").length;
 
   document.getElementById("active-count").textContent =
-    state.sessions.filter(session =>
-      session.status === "active"
-    ).length;
+    state.sessions.filter(session => session.status === "active").length;
 }
 
 function renderParkingLayout() {
-  const grid = document.getElementById("slot-grid");
-
-  grid.innerHTML = state.slots.map(slot => {
+  document.getElementById("slot-grid").innerHTML = state.slots.map(slot => {
     const status = getSlotStatus(slot);
     const session = getSessionForSlot(slot);
 
@@ -267,9 +346,7 @@ function renderRecentSessions() {
       <td><strong>${escapeHtml(session.ticketId)}</strong></td>
       <td>${escapeHtml(session.slotId)}</td>
       <td>${escapeHtml(
-        session.vehicleNumber ||
-        session.customerName ||
-        "Walk-in customer"
+        session.vehicleNumber || session.customerName || "Walk-in customer"
       )}</td>
       <td>${formatDate(session.startAt)}</td>
       <td>${sessionStatusPill(session)}</td>
@@ -281,16 +358,14 @@ function renderEntry() {
   const select = document.getElementById("slot-select");
   const previous = select.value;
 
-  const available = state.slots.filter(slot =>
-    getSlotStatus(slot) === "available"
+  const available = state.slots.filter(
+    slot => getSlotStatus(slot) === "available"
   );
 
   select.innerHTML = available.length
-    ? available.map(slot => `
-        <option value="${escapeHtml(slot.id)}">
-          ${escapeHtml(slot.id)}
-        </option>
-      `).join("")
+    ? available.map(slot =>
+        `<option value="${escapeHtml(slot.id)}">${escapeHtml(slot.id)}</option>`
+      ).join("")
     : '<option value="">No available slots</option>';
 
   if (available.some(slot => slot.id === previous)) {
@@ -299,22 +374,19 @@ function renderEntry() {
 
   select.disabled = available.length === 0;
 
-  document.querySelector(
-    '#entry-form button[type="submit"]'
-  ).disabled = available.length === 0;
+  document.querySelector('#entry-form button[type="submit"]').disabled =
+    available.length === 0 || !firebaseReady;
 
   document.getElementById("entry-slot-list").innerHTML =
     state.slots.map(slot => {
       const status = getSlotStatus(slot);
       const session = getSessionForSlot(slot);
 
-      let detail = "Ready to assign";
-
-      if (status === "reserved") {
-        detail = `Ticket ${slot.reservationId}`;
-      } else if (status === "occupied") {
-        detail = session?.ticketId || "Vehicle detected";
-      }
+      const detail = status === "available"
+        ? "Ready to assign"
+        : status === "reserved"
+          ? `Ticket ${slot.reservationId}`
+          : session?.ticketId || "Vehicle detected";
 
       return `
         <div class="compact-slot">
@@ -322,20 +394,21 @@ function renderEntry() {
             <strong>${escapeHtml(slot.id)}</strong>
             <small>${escapeHtml(detail)}</small>
           </div>
-          <span class="mini-status ${status}">
-            ${statusLabel(slot)}
-          </span>
+          <span class="mini-status ${status}">${statusLabel(slot)}</span>
         </div>
       `;
     }).join("");
 }
 
-/* =========================================
-   CREATE PARKING TICKET
-   ========================================= */
+// ---------------- CREATE TICKET ----------------
 
 document.getElementById("entry-form").addEventListener("submit", event => {
   event.preventDefault();
+
+  if (!firebaseReady) {
+    showToast("Please wait for the cloud database to connect.");
+    return;
+  }
 
   const slotId = document.getElementById("slot-select").value;
   const slot = state.slots.find(item => item.id === slotId);
@@ -346,14 +419,11 @@ document.getElementById("entry-form").addEventListener("submit", event => {
     return;
   }
 
-  const customerName = document
-    .getElementById("customer-name")
-    .value.trim();
+  const customerName =
+    document.getElementById("customer-name").value.trim();
 
-  const vehicleNumber = document
-    .getElementById("vehicle-number")
-    .value.trim()
-    .toUpperCase();
+  const vehicleNumber =
+    document.getElementById("vehicle-number").value.trim().toUpperCase();
 
   const now = Date.now();
 
@@ -371,7 +441,6 @@ document.getElementById("entry-form").addEventListener("submit", event => {
     paidAt: null
   };
 
-  // Assign the slot and start the timer immediately.
   slot.reservationId = session.ticketId;
   slot.sessionId = session.id;
   slot.sensor = "occupied";
@@ -380,26 +449,20 @@ document.getElementById("entry-form").addEventListener("submit", event => {
   saveState();
 
   const result = document.getElementById("ticket-result");
-
   result.classList.remove("hidden");
+
   result.innerHTML = `
     <h3>Parking ticket created</h3>
-    <div class="ticket-number">
-      ${escapeHtml(session.ticketId)}
-    </div>
+    <div class="ticket-number">${escapeHtml(session.ticketId)}</div>
     <p>
       <strong>Slot:</strong> ${escapeHtml(slotId)}<br>
-      <strong>Customer:</strong>
-      ${escapeHtml(customerName || "Walk-in customer")}<br>
-      <strong>Vehicle:</strong>
-      ${escapeHtml(vehicleNumber || "Not provided")}<br>
+      <strong>Customer:</strong> ${escapeHtml(customerName || "Walk-in customer")}<br>
+      <strong>Vehicle:</strong> ${escapeHtml(vehicleNumber || "Not provided")}<br>
       <strong>Timer:</strong> Started automatically at ${formatDate(now)}
     </p>
     <div class="ticket-actions">
-      <button class="secondary-button" id="copy-ticket" type="button">
-        Copy ticket ID
-      </button>
-      <button class="secondary-button" id="open-created-ticket" type="button">
+      <button class="secondary-button" id="copy-ticket">Copy ticket ID</button>
+      <button class="secondary-button" id="open-created-ticket">
         Open ticket details
       </button>
     </div>
@@ -421,9 +484,7 @@ document.getElementById("entry-form").addEventListener("submit", event => {
   showToast(`Ticket ${session.ticketId} created. Timer started.`);
 });
 
-/* =========================================
-   EXIT TICKET TABLE
-   ========================================= */
+// ---------------- EXIT TICKET TABLE ----------------
 
 function renderTicketTable() {
   const tbody = document.getElementById("ticket-table");
@@ -450,7 +511,7 @@ function renderTicketTable() {
       : "—";
 
     const fee = session.startAt
-      ? `₹${session.fee ?? calculateFee(session.startAt, end)}`
+      ? `₹${calculateFee(session.startAt, end)}`
       : "—";
 
     let action = "";
@@ -482,9 +543,7 @@ function renderTicketTable() {
         <td><strong>${escapeHtml(session.ticketId)}</strong></td>
         <td>${escapeHtml(session.slotId)}</td>
         <td>${escapeHtml(
-          session.vehicleNumber ||
-          session.customerName ||
-          "Walk-in"
+          session.vehicleNumber || session.customerName || "Walk-in"
         )}</td>
         <td>${duration}</td>
         <td>${fee}</td>
@@ -495,9 +554,7 @@ function renderTicketTable() {
   }).join("");
 }
 
-/* =========================================
-   TICKET SEARCH AND AUTOCOMPLETE
-   ========================================= */
+// ---------------- SEARCH SUGGESTIONS ----------------
 
 const searchInput = document.getElementById("ticket-search");
 const suggestionsBox = document.getElementById("ticket-suggestions");
@@ -535,40 +592,29 @@ function renderSuggestions(query) {
   suggestionsBox.classList.remove("hidden");
 
   if (!matches.length) {
-    suggestionsBox.innerHTML = `
-      <div class="suggestion-empty">
-        No matching tickets found.
-      </div>
-    `;
+    suggestionsBox.innerHTML =
+      '<div class="suggestion-empty">No matching tickets found.</div>';
     return;
   }
 
-  suggestionsBox.innerHTML = matches.map(session => {
-    const statusText = {
-      active: "Active",
-      awaiting_payment: "Awaiting payment",
-      paid: "Paid"
-    }[session.status] || "Closed";
-
-    return `
-      <button type="button"
-        class="suggestion-item"
-        data-action="select-suggestion"
-        data-id="${escapeHtml(session.id)}">
-        <strong>
-          ${escapeHtml(session.ticketId)} · Slot ${escapeHtml(session.slotId)}
-        </strong>
-        <small>
-          ${escapeHtml(
-            session.vehicleNumber ||
-            session.customerName ||
-            "Walk-in customer"
-          )}
-          · ${statusText}
-        </small>
-      </button>
-    `;
-  }).join("");
+  suggestionsBox.innerHTML = matches.map(session => `
+    <button type="button"
+      class="suggestion-item"
+      data-action="select-suggestion"
+      data-id="${escapeHtml(session.id)}">
+      <strong>
+        ${escapeHtml(session.ticketId)} · Slot ${escapeHtml(session.slotId)}
+      </strong>
+      <small>
+        ${escapeHtml(session.vehicleNumber || session.customerName || "Walk-in customer")}
+        · ${session.status === "active"
+          ? "Active"
+          : session.status === "awaiting_payment"
+            ? "Awaiting payment"
+            : "Paid"}
+      </small>
+    </button>
+  `).join("");
 }
 
 searchInput.addEventListener("input", () => {
@@ -598,14 +644,15 @@ document.getElementById("lookup-form").addEventListener("submit", event => {
 });
 
 document.addEventListener("click", event => {
-  if (!event.target.closest(".search-wrapper")) {
+  if (
+    !event.target.closest(".search-wrapper") &&
+    !event.target.closest('[data-action="select-suggestion"]')
+  ) {
     suggestionsBox.classList.add("hidden");
   }
 });
 
-/* =========================================
-   SELECTED TICKET DETAILS
-   ========================================= */
+// ---------------- SELECTED TICKET DETAILS ----------------
 
 function openTicket(sessionId) {
   const session = state.sessions.find(item => item.id === sessionId);
@@ -625,8 +672,8 @@ function openTicket(sessionId) {
 function renderExitResult() {
   const target = document.getElementById("exit-result");
 
-  const session = state.sessions.find(item =>
-    item.id === selectedExitTicket
+  const session = state.sessions.find(
+    item => item.id === selectedExitTicket
   );
 
   if (!session) {
@@ -640,10 +687,9 @@ function renderExitResult() {
     ? formatDuration(session.startAt, end)
     : "—";
 
-  const fee = session.status === "paid" ||
-    session.status === "awaiting_payment"
-    ? Number(session.fee || 0)
-    : calculateFee(session.startAt, end);
+  const fee = session.startAt
+    ? calculateFee(session.startAt, end)
+    : 0;
 
   let paymentStatus = "In progress";
 
@@ -713,9 +759,7 @@ function renderExitResult() {
 
       <div class="exit-buttons">
         ${action}
-        <button class="secondary-button"
-          data-action="clear-selection"
-          type="button">
+        <button class="secondary-button" data-action="clear-selection">
           Clear selection
         </button>
       </div>
@@ -723,11 +767,14 @@ function renderExitResult() {
   `;
 }
 
-/* =========================================
-   VEHICLE LEAVING
-   ========================================= */
+// ---------------- VEHICLE LEAVING ----------------
 
 function vehicleLeaving(sessionId) {
+  if (!firebaseReady) {
+    showToast("Please wait for the cloud database to connect.");
+    return;
+  }
+
   const session = state.sessions.find(item => item.id === sessionId);
 
   if (!session || session.status !== "active") {
@@ -742,7 +789,6 @@ function vehicleLeaving(sessionId) {
   const slot = state.slots.find(item => item.id === session.slotId);
 
   if (slot) {
-    // Vehicle has left. Keep the slot reserved until payment.
     slot.sensor = "vacant";
     slot.reservationId = session.ticketId;
   }
@@ -752,16 +798,17 @@ function vehicleLeaving(sessionId) {
   saveState();
   renderAll();
 
-  showToast(
-    `Departure recorded. Fee: ₹${session.fee}. Confirm payment.`
-  );
+  showToast(`Departure recorded. Fee: ₹${session.fee}. Confirm payment.`);
 }
 
-/* =========================================
-   CONFIRM PAYMENT
-   ========================================= */
+// ---------------- CONFIRM PAYMENT ----------------
 
 function confirmPayment(sessionId) {
+  if (!firebaseReady) {
+    showToast("Please wait for the cloud database to connect.");
+    return;
+  }
+
   const session = state.sessions.find(item => item.id === sessionId);
 
   if (!session || session.status !== "awaiting_payment") {
@@ -783,14 +830,10 @@ function confirmPayment(sessionId) {
   saveState();
   renderAll();
 
-  showToast(
-    `Payment of ₹${session.fee} recorded. Slot is available.`
-  );
+  showToast(`Payment of ₹${session.fee} recorded. Slot is available.`);
 }
 
-/* =========================================
-   ACTION BUTTON HANDLERS
-   ========================================= */
+// ---------------- ACTION BUTTON HANDLERS ----------------
 
 document.addEventListener("click", event => {
   const button = event.target.closest("[data-action]");
@@ -818,14 +861,11 @@ document.addEventListener("click", event => {
   if (action === "clear-selection") {
     selectedExitTicket = null;
     searchInput.value = "";
-    suggestionsBox.classList.add("hidden");
     renderExitResult();
   }
 });
 
-/* =========================================
-   NAVIGATION
-   ========================================= */
+// ---------------- NAVIGATION ----------------
 
 function navigate(view) {
   const pages = {
@@ -862,15 +902,11 @@ function navigate(view) {
 }
 
 document.querySelectorAll(".nav-item").forEach(button => {
-  button.addEventListener("click", () => {
-    navigate(button.dataset.view);
-  });
+  button.addEventListener("click", () => navigate(button.dataset.view));
 });
 
 document.querySelectorAll("[data-go]").forEach(button => {
-  button.addEventListener("click", () => {
-    navigate(button.dataset.go);
-  });
+  button.addEventListener("click", () => navigate(button.dataset.go));
 });
 
 document.querySelectorAll(".brand[data-view]").forEach(link => {
@@ -880,11 +916,14 @@ document.querySelectorAll(".brand[data-view]").forEach(link => {
   });
 });
 
-/* =========================================
-   PARKING RATE SETTINGS
-   ========================================= */
+// ---------------- RATE SETTINGS ----------------
 
 document.getElementById("edit-rate").addEventListener("click", () => {
+  if (!firebaseReady) {
+    showToast("Please wait for the cloud database to connect.");
+    return;
+  }
+
   const answer = prompt(
     "Enter the hourly parking rate in rupees:",
     String(state.rate)
@@ -907,57 +946,33 @@ document.getElementById("edit-rate").addEventListener("click", () => {
   showToast(`Hourly rate changed to ₹${state.rate}.`);
 });
 
-/* =========================================
-   COPY TICKET ID
-   ========================================= */
+// ---------------- UTILITIES ----------------
 
-async function copyTicketId(ticketId) {
-  try {
-    if (!navigator.clipboard) {
-      throw new Error("Clipboard unavailable");
-    }
-
-    await navigator.clipboard.writeText(ticketId);
-    showToast("Ticket ID copied.");
-  } catch (error) {
+function copyTicketId(ticketId) {
+  if (!navigator.clipboard) {
     showToast(`Ticket ID: ${ticketId}`);
+    return;
   }
-}
 
-/* =========================================
-   TOAST NOTIFICATIONS
-   The toast is hidden when empty and after
-   each notification timeout.
-   ========================================= */
+  navigator.clipboard.writeText(ticketId)
+    .then(() => showToast("Ticket ID copied."))
+    .catch(() => showToast(`Ticket ID: ${ticketId}`));
+}
 
 function showToast(message) {
   const toast = document.getElementById("toast");
 
-  if (toastTimer) {
-    clearTimeout(toastTimer);
-    toastTimer = null;
-  }
-
-  // Keep it hidden if there is no message.
-  toast.classList.remove("show");
-  toast.textContent = "";
-
-  if (!message) return;
-
   toast.textContent = message;
   toast.classList.add("show");
 
+  clearTimeout(toastTimer);
+
   toastTimer = setTimeout(() => {
     toast.classList.remove("show");
-    toast.textContent = "";
-    toastTimer = null;
   }, 2800);
 }
 
-/* =========================================
-   LIVE DURATION AND FEE REFRESH
-   ========================================= */
-
+// Refresh elapsed duration and fee every second.
 setInterval(() => {
   renderStats();
   renderTicketTable();
@@ -967,6 +982,7 @@ setInterval(() => {
   }
 }, 1000);
 
-/* Initial dashboard render */
-
+// Initial display while Firebase connects.
 renderAll();
+setConnectionStatus(false);
+initializeFirebase();

@@ -34,14 +34,11 @@
       <div>
         <p class="eyebrow">PARKING CONTROL CENTER</p>
         <h1 id="page-title">Overview</h1>
-        <p id="page-subtitle">
-          Monitor availability and manage parking sessions.
-        </p>
+        <p id="page-subtitle">Monitor availability and manage parking sessions.</p>
       </div>
       <span class="mode-label">SOFTWARE PROTOTYPE</span>
     </header>
 
-    <!-- OVERVIEW -->
     <section id="view-overview" class="view">
       <div class="stats-grid">
         <article class="stat-card">
@@ -49,19 +46,16 @@
           <strong id="total-count">8</strong>
           <small>Spaces on this floor</small>
         </article>
-
         <article class="stat-card">
           <p>Available</p>
           <strong id="available-count">8</strong>
           <small>Ready to assign</small>
         </article>
-
         <article class="stat-card">
           <p>Occupied</p>
           <strong id="occupied-count">0</strong>
           <small>Vehicle detected</small>
         </article>
-
         <article class="stat-card">
           <p>Active sessions</p>
           <strong id="active-count">0</strong>
@@ -78,9 +72,7 @@
             </div>
             <span class="small-label">LIVE SIMULATION</span>
           </div>
-
           <div id="slot-grid" class="slot-grid"></div>
-
           <div class="legend">
             <span><i class="dot available-dot"></i>Available</span>
             <span><i class="dot reserved-dot"></i>Reserved</span>
@@ -131,9 +123,7 @@
             <h2>Recent parking sessions</h2>
             <p>Latest tickets and their current status</p>
           </div>
-          <button class="text-button" data-go="exit">
-            View all tickets →
-          </button>
+          <button class="text-button" data-go="exit">View all tickets →</button>
         </div>
 
         <div class="table-wrap">
@@ -153,7 +143,6 @@
       </section>
     </section>
 
-    <!-- ENTRY DASHBOARD -->
     <section id="view-entry" class="view hidden">
       <div class="section-intro">
         <div>
@@ -176,21 +165,18 @@
             <label for="customer-name">
               Customer name <span class="optional">(optional)</span>
             </label>
-            <input id="customer-name" maxlength="60"
-              placeholder="e.g. Customer 1">
+            <input id="customer-name" maxlength="60" placeholder="e.g. Customer 1">
 
             <label for="vehicle-number">
               Vehicle number <span class="optional">(optional)</span>
             </label>
-            <input id="vehicle-number" maxlength="20"
-              placeholder="e.g. KA 01 AB 1234">
+            <input id="vehicle-number" maxlength="20" placeholder="e.g. KA 01 AB 1234">
 
             <label for="slot-select">Available slot</label>
             <select id="slot-select" required></select>
 
             <p class="form-hint">
-              Creating the ticket reserves the slot and starts the parking
-              timer automatically.
+              Creating the ticket reserves the slot and starts the parking timer automatically.
             </p>
 
             <button class="primary-button" type="submit">
@@ -213,7 +199,6 @@
       </div>
     </section>
 
-    <!-- EXIT DASHBOARD -->
     <section id="view-exit" class="view hidden">
       <div class="section-intro">
         <div>
@@ -236,16 +221,13 @@
                 aria-autocomplete="list"
                 aria-controls="ticket-suggestions"
               >
-              <div id="ticket-suggestions"
-                   class="suggestions hidden"></div>
+              <div id="ticket-suggestions" class="suggestions hidden"></div>
             </div>
           </div>
           <button class="primary-button" type="submit">Search</button>
         </form>
-
         <p class="form-hint">
-          Start typing to see matching tickets. Select a suggestion to open
-          its details.
+          Start typing to see matching tickets. Select a suggestion to open its details.
         </p>
       </section>
 
@@ -280,12 +262,16 @@
 
     <footer>
       <span>Smart Parking System · Prototype v1.1</span>
-      <span>Local demo data is saved in this browser.</span>
+      <span>Cloud database synchronizes parking data.</span>
     </footer>
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+  <!-- Firebase SDKs for a plain HTML/CSS/JavaScript project -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
