@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Parking System</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#" data-view="overview">
+      <span class="brand-text">
+        <strong>Smart Parking</strong>
+        <small>Management system</small>
+      </span>
+    </a>
+
+    <p class="nav-label">WORKSPACE</p>
+    <button class="nav-item active" data-view="overview">Overview</button>
+    <button class="nav-item" data-view="entry">Entry dashboard</button>
+    <button class="nav-item" data-view="exit">Exit dashboard</button>
+
+    <div class="sidebar-bottom">
+      <span class="status-indicator"></span>
+      <div>
+        <strong>Simulation mode</strong>
+        <small>Sensor data is simulated</small>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">PARKING CONTROL CENTER</p>
+        <h1 id="page-title">Overview</h1>
+        <p id="page-subtitle">
+          Monitor availability and manage parking sessions.
+        </p>
+      </div>
+      <span class="mode-label">SOFTWARE PROTOTYPE</span>
+    </header>
+
+    <!-- OVERVIEW -->
+    <section id="view-overview" class="view">
+      <div class="stats-grid">
+        <article class="stat-card">
+          <p>Total slots</p>
+          <strong id="total-count">8</strong>
+          <small>Spaces on this floor</small>
+        </article>
+
+        <article class="stat-card">
+          <p>Available</p>
+          <strong id="available-count">8</strong>
+          <small>Ready to assign</small>
+        </article>
+
+        <article class="stat-card">
+          <p>Occupied</p>
+          <strong id="occupied-count">0</strong>
+          <small>Vehicle detected</small>
+        </article>
+
+        <article class="stat-card">
+          <p>Active sessions</p>
+          <strong id="active-count">0</strong>
+          <small>Parking in progress</small>
+        </article>
+      </div>
+
+      <div class="content-grid">
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Parking layout</h2>
+              <p>One floor · 8 parking slots</p>
+            </div>
+            <span class="small-label">LIVE SIMULATION</span>
+          </div>
+
+          <div id="slot-grid" class="slot-grid"></div>
+
+          <div class="legend">
+            <span><i class="dot available-dot"></i>Available</span>
+            <span><i class="dot reserved-dot"></i>Reserved</span>
+            <span><i class="dot occupied-dot"></i>Occupied</span>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Quick actions</h2>
+              <p>Manage the parking workflow</p>
+            </div>
+          </div>
+
+          <button class="quick-action" data-go="entry">
+            <span class="action-symbol">+</span>
+            <span>
+              <strong>Assign a parking slot</strong>
+              <small>Create a ticket for an arriving vehicle</small>
+            </span>
+            <span class="arrow">→</span>
+          </button>
+
+          <button class="quick-action" data-go="exit">
+            <span class="action-symbol">↗</span>
+            <span>
+              <strong>Process an exit</strong>
+              <small>Calculate charges and record payment</small>
+            </span>
+            <span class="arrow">→</span>
+          </button>
+
+          <div class="rate-box">
+            <div>
+              <span>Hourly parking rate</span>
+              <strong>₹<span id="rate-display">40</span>/hour</strong>
+            </div>
+            <button id="edit-rate" class="text-button">Change rate</button>
+            <small>Illustrative rate for the prototype.</small>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Recent parking sessions</h2>
+            <p>Latest tickets and their current status</p>
+          </div>
+          <button class="text-button" data-go="exit">
+            View all tickets →
+          </button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Ticket ID</th>
+                <th>Slot</th>
+                <th>Vehicle</th>
+                <th>Start time</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="recent-sessions"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <!-- ENTRY DASHBOARD -->
+    <section id="view-entry" class="view hidden">
+      <div class="section-intro">
+        <div>
+          <h2>Entry dashboard</h2>
+          <p>Assign a vacant slot and issue a parking ticket.</p>
+        </div>
+        <span class="small-label">ENTRY COUNTER</span>
+      </div>
+
+      <div class="content-grid entry-grid">
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <h2>New parking ticket</h2>
+              <p>Select an available slot for the customer.</p>
+            </div>
+          </div>
+
+          <form id="entry-form" class="form">
+            <label for="customer-name">
+              Customer name <span class="optional">(optional)</span>
+            </label>
+            <input id="customer-name" maxlength="60"
+              placeholder="e.g. Customer 1">
+
+            <label for="vehicle-number">
+              Vehicle number <span class="optional">(optional)</span>
+            </label>
+            <input id="vehicle-number" maxlength="20"
+              placeholder="e.g. KA 01 AB 1234">
+
+            <label for="slot-select">Available slot</label>
+            <select id="slot-select" required></select>
+
+            <p class="form-hint">
+              Creating the ticket reserves the slot and starts the parking
+              timer automatically.
+            </p>
+
+            <button class="primary-button" type="submit">
+              Create ticket and assign slot
+            </button>
+          </form>
+
+          <div id="ticket-result" class="ticket-result hidden"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Slot availability</h2>
+              <p>Current status of all parking spaces</p>
+            </div>
+          </div>
+          <div id="entry-slot-list" class="compact-slot-list"></div>
+        </section>
+      </div>
+    </section>
+
+    <!-- EXIT DASHBOARD -->
+    <section id="view-exit" class="view hidden">
+      <div class="section-intro">
+        <div>
+          <h2>Exit dashboard</h2>
+          <p>Find tickets, calculate fees, and record payments.</p>
+        </div>
+        <span class="small-label">EXIT COUNTER</span>
+      </div>
+
+      <section class="panel lookup-panel">
+        <form id="lookup-form" class="lookup-form">
+          <div class="lookup-field">
+            <label for="ticket-search">Search parking tickets</label>
+            <div class="search-wrapper">
+              <input
+                id="ticket-search"
+                type="search"
+                placeholder="Type ticket ID, customer, vehicle or slot..."
+                autocomplete="off"
+                aria-autocomplete="list"
+                aria-controls="ticket-suggestions"
+              >
+              <div id="ticket-suggestions"
+                   class="suggestions hidden"></div>
+            </div>
+          </div>
+          <button class="primary-button" type="submit">Search</button>
+        </form>
+
+        <p class="form-hint">
+          Start typing to see matching tickets. Select a suggestion to open
+          its details.
+        </p>
+      </section>
+
+      <div id="exit-result"></div>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Parking tickets</h2>
+            <p>Manage vehicle departures and payments directly here.</p>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="ticket-table">
+            <thead>
+              <tr>
+                <th>Ticket ID</th>
+                <th>Slot</th>
+                <th>Vehicle</th>
+                <th>Duration</th>
+                <th>Fee</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="ticket-table"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <footer>
+      <span>Smart Parking System · Prototype v1.1</span>
+      <span>Local demo data is saved in this browser.</span>
+    </footer>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
